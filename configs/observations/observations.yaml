@@ -26,6 +26,8 @@ aliases:
   # Core robot state
   robot_pose: robot_pose_from_tf    # Primary robot localization source
   # robot_pose_tf: robot_pose_from_tf   # Alternative TF-based localization
+
+  end_effector_pose: end_effector_pose_from_tf # Primary end effector Localization Source
   
   # Navigation targets
   # goal: goal_pose                     # Final navigation target
@@ -56,12 +58,36 @@ datasources:
     type: RobotPoseTFGenerator         # Generator (no ROS topic) → Pose2D
     params: {}                         # Uses simulation_state_container for frame config
 
+  end_effector_pose_from_tf:
+    type: EndEffectorPoseTFGenerator   # Generator (no ROS topic) → Pose3D
+    params: {}                          
+
   # Sensor data collectors
   front_laser:
     type: sensor_msgs/LaserScan        # → LidarRanges
     params:
-      topic: "lidar"                    # Primary lidar topic
+      topic: "lidar"                   # Primary lidar topic
       up_to_date_required: true        # Critical for obstacle avoidance
+  
+  # base_arm_camera_color:
+  #   type: sensor_msgs/Image
+  #   params:
+  #     topic: "arm_overview_camera/color/image_raw"
+
+  # base_arm_camera_depth:
+  #   type: sensor_msgs/Image
+  #   params:
+  #     topic: "arm_overview_camera/depth/image_raw"
+
+  # wrist_camera_color:
+  #   type: sensor_msgs/Image
+  #   params:
+  #     topic: "wrist_camera/color/image_raw"
+
+  # wrist_camera_depth:
+  #   type: sensor_msgs/Image
+  #   params:
+  #     topic: "wrist_camera/depth/image_raw"
 
   # Navigation target collectors  
   goal_pose:
@@ -122,6 +148,13 @@ datasources:
   #     topic: "collision_monitor_state"
   #     state_key: "collision"            # Specific collision state to monitor
 
+  # Arm state 
+  joint_states:
+    type: sensor_msgs/JointState     # → JointState
+    params:
+      topic: "joint_states"
+      up_to_date_required: true
+
   # ---------------------------------------------------------------------------
   # OPTIONAL COLLECTORS: Additional sensors for advanced configurations
   # ---------------------------------------------------------------------------
@@ -164,9 +197,15 @@ datasources:
   subgoal_in_robot_frame:
     type: SubgoalLocationInRobotFrameGenerator  # Transforms subgoal from world → robot frame
 
+  arm_goal_in_ee_frame:
+    type: ArmGoalLocationInEndEffectorFrameGenerator
+
   # Navigation metrics - distance and angle computations
   dist_angle_to_goal:
     type: DistAngleToGoalGenerator           # Computes [distance, angle] to goal
+
+  arm_dist_angle_to_goal:                    
+    type: ArmDistAngleToGoalGenerator        # Computes [distance_error, angle_error] to goal
 
   dist_angle_to_subgoal:
     type: DistAngleToSubgoalGenerator        # Computes [distance, angle] to subgoal
