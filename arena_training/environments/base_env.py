@@ -3,7 +3,7 @@ import posixpath
 import threading
 import time
 from abc import ABC
-from typing import Any
+from typing import Any, List, Tuple
 
 import arena_robots.Robot
 import gymnasium
@@ -13,6 +13,7 @@ import yaml
 from arena_runtime_msgs.srv import LifecycleHold as LifecycleHoldSrv
 from arena_runtime_msgs.srv import LifecycleStep as LifecycleStepSrv
 from geometry_msgs.msg import Twist
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from rcl_interfaces.srv import GetParameters as GetParametersSrv
 from rclpy.task import Future
 from rosnav_rl.cfg.parameters import AgentParameters
@@ -33,9 +34,11 @@ from arena_training.arena_rosnav_rl.node import SupervisorNode
 from arena_training.arena_rosnav_rl.utils.envs import (
     determine_termination,
     get_twist_from_action,
+    get_joint_trajectory_from_action,
 )
 from arena_training.arena_rosnav_rl.utils.type_alias.observation import InformationDict
 
+_ARM_STOW_POSITIONS = np.array([0.0, -1.57, 1.57, -1.57, -1.57, 0.0], dtype=np.float32)
 
 class ArenaBaseEnv(ABC, gymnasium.Env):
     """Abstract base class for Arena reinforcement learning environments.
@@ -124,6 +127,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             raise ValueError("A reward function is required for training mode.")
 
         self._initialize_agent_components(space_manager, reward_function)
+        self._arm_joint_names = self._extract_arm_joint_names()
         self.__agent_parameters = simulation_state_container
 
         self._obs_unit_kwargs = obs_unit_kwargs or {}
@@ -139,6 +143,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._reset_task_srv = None
         self._pause_srv = None
         self._cmd_vel_pub = None
+        self._joint_trajectory_pub = None
         self._episode_state_sub = None
         self._latest_episode: EpisodeRecord | None = None
         self._episode_event = threading.Event()
@@ -261,6 +266,12 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._cmd_vel_pub = self.node.create_publisher(Twist, cmd_vel_topic, 10)
         self.node.get_logger().info(f"Created direct cmd_vel publisher at: {cmd_vel_topic}")
 
+        # Direct JointTrajectory publisher, the sole source of joint trajectory commands
+        # druing training. Compeletly bypassing MoveIt
+        joint_trajectory_topic = self.robot_ns("arm_controller/joint_trajectory").to_string()  
+        self._joint_trajectory_pub = self.node.create_publisher(JointTrajectory, joint_trajectory_topic, 10)
+        self.node.get_logger().info(f"Created direct JointTrajectory publisher at: {joint_trajectory_topic}")
+
         # Episode-state feed from task_generator (TRANSIENT_LOCAL).
         episode_topic = (self.env_ns / "state" / "episode").to_string()
         self._episode_state_sub = self.node.create_subscription(
@@ -363,6 +374,23 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         """Decodes the given action using the model space encoder."""
         return self._model_space_manager.decode_action(action)
 
+    def _decode_split_action(self, action: np.ndarray) -> List[Tuple[str, np.ndarray]]:
+        """Decode action into typed sub-actions."""
+        return self._model_space_manager.decode_split_action(action)
+
+    def _extract_arm_joint_names(self) -> list[str]:
+        """Extracts arm joint names from the action space spec, handling composites."""
+        spec = self._model_space_manager.action_space_manager.spec
+        
+        if getattr(spec, "type", None) == "arm":
+            return spec.joint_names
+            
+        for sub_spec in getattr(spec, "action_spaces", []):
+            if sub_spec.type == "arm":
+                return sub_spec.joint_names
+                
+        return []
+
     def _encode_observation(self, observation: ObservationDict) -> EncodedObservationDict:
         """Encodes the given observation using the model space encoder."""
         return self._model_space_manager.encode_observation(observation)
@@ -378,14 +406,19 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         4. Calculates the reward and determines if the episode has terminated.
         5. Returns the standard Gymnasium step tuple.
         """
-        decoded_action = self._decode_action(action)
+        decoded_action = self._decode_split_action(action)
 
         # First step() means agent inference returned at least once: model is loaded.
         if not self._ready_event.is_set():
             self._ready_event.set()
 
-        # Publish velocity command directly, no nav2 controller dependency.
-        self._cmd_vel_pub.publish(get_twist_from_action(decoded_action))
+        for type_name, decoded in decoded_action:
+            if type_name == "omnidirectional" or type_name == "differential_drive":
+                # Publish velocity command directly, no nav2 controller dependency.
+                self._cmd_vel_pub.publish(get_twist_from_action(decoded))
+            elif type_name == "arm":
+                self._joint_trajectory_pub.publish(get_joint_trajectory_from_action(decoded, self._arm_joint_names))
+
 
         if self._lockstep:
             self._step_sim(self._lockstep_step_seconds)
@@ -482,6 +515,12 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         # Stop the robot immediately.
         if self._cmd_vel_pub is not None:
             self._cmd_vel_pub.publish(Twist())
+
+        # Reset arm to stow position
+        if self._joint_trajectory_pub is not None:
+            self._joint_trajectory_pub.publish(
+                get_joint_trajectory_from_action(_ARM_STOW_POSITIONS, self._arm_joint_names)
+            )
 
         try:
             steps_this_episode = self._steps_curr_episode
