@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from rosnav_rl.rl_agent import RL_Agent
 from rosnav_rl.utils.type_aliases import SupportedRLFrameworks
+from rosnav_rl.cfg.action_spaces import ActionSpaceSpec
 
 import arena_training.arena_rosnav_rl.cfg as arena_cfg
 
@@ -236,9 +237,12 @@ class ArenaTrainer(ABC):
         from rosnav_rl.cfg.action_spaces import (
             DifferentialDriveActionSpace,
             OmnidirectionalActionSpace,
+            ArmActionSpace,
+            CompositeActionSpace
         )
 
         robot_cfg = self.config.arena_cfg.robot
+        caps = robot_cfg.effective_caps
         robot_desc = robot_cfg.robot_description
         general = self.config.arena_cfg.general
         cont = robot_desc.actions.continuous
@@ -257,6 +261,11 @@ class ArenaTrainer(ABC):
                 linear_range=linear,
                 angular_range=angular,
             )
+
+        arm = caps.arm
+        if arm:
+            arm_action_space = ArmActionSpace.from_config(arm)
+            action_space = CompositeActionSpace(action_spaces=[action_space, arm_action_space])
 
         # Carry over the discretization config from the agent_config YAML, then
         # resolve it immediately using the robot's built-in discrete action list.
