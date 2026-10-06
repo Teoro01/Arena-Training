@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 
 from rosnav_rl.rl_agent import RL_Agent
 from rosnav_rl.utils.type_aliases import SupportedRLFrameworks
-from rosnav_rl.cfg.action_spaces import ActionSpaceSpec
 
 import arena_training.arena_rosnav_rl.cfg as arena_cfg
 
@@ -237,7 +236,7 @@ class ArenaTrainer(ABC):
         from rosnav_rl.cfg.action_spaces import (
             DifferentialDriveActionSpace,
             OmnidirectionalActionSpace,
-            ArmActionSpace,
+            ManipulatorActionSpace,
             CompositeActionSpace
         )
 
@@ -262,10 +261,13 @@ class ArenaTrainer(ABC):
                 angular_range=angular,
             )
 
-        arm = caps.arm
-        if arm:
-            arm_action_space = ArmActionSpace.from_config(arm)
-            action_space = CompositeActionSpace(action_spaces=[action_space, arm_action_space])
+            
+        # Multi arm config technically possible but not fully supported
+        arms = caps.arm
+        if arms:
+            for mount_name, arm_spec in arms.items():
+                arm_action_space = ManipulatorActionSpace.from_config(arm_spec)
+                action_space = CompositeActionSpace(action_spaces=[action_space, arm_action_space])
 
         # Carry over the discretization config from the agent_config YAML, then
         # resolve it immediately using the robot's built-in discrete action list.
