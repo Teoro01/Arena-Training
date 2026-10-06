@@ -14,7 +14,7 @@ agent_config:
     name: stable_baselines3  # ML framework name used for training
     algorithm: # training algorithm configuration
       type: PPO  # discriminator tag — PPO | A2C | TRPO | SAC | TD3 | TQC | CrossQ | generic
-      architecture_name: AGENT_1  # neural network architecture identifier
+      architecture_name: AGENT_7  # neural network architecture identifier
       checkpoint: last_model  # checkpoint to load when resuming training (last_model or best_model)
       # transfer_weights:  # for transfer learning - uncomment to use
       #   source_dir: /home/tar/catkin_ws/src/planners/rosnav/agents/AGENT_5
@@ -100,13 +100,16 @@ arena_cfg:
   robot:
     robot_model: rbkairos
     parts:
+      lidar:
+        - variant: sick_s300
+          mount: front
       arm:
         - variant: ur5e
           mount: arm_mount
       camera:
-        - variant: d435_color
+        - variant: oakd_rgbd
           mount: wrist_cam
-        - variant: d435_color
+        - variant: oakd_rgbd
           mount: arm_base_cam
 
   # general training configuration
