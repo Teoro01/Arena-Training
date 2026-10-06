@@ -1,6 +1,7 @@
 import arena_robots.Robot
 from arena_robots.caps import MobileSpec, RobotCaps
 from arena_robots.Robot import RobotView
+from arena_robots.assembly import RequestPart
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, Dict, List
 
@@ -29,7 +30,16 @@ class RobotCfg(BaseModel):
 
         if self.view is None:
             resolved_view = arena_robots.Robot.RobotIdentifier(self.robot_model).resolve_sync()
-            caps = resolved_view.effective_caps(parts = self.parts, frames = self.frames or None)
+
+            parsed_parts = {}
+            if self.parts:
+                for category, items in self.parts.items():
+                    parsed_parts[category] = [
+                        RequestPart(**item) if isinstance(item, dict) else item 
+                        for item in items
+                    ]
+
+            caps = resolved_view.effective_caps(parts=parsed_parts, frames=self.frames or None)
 
             object.__setattr__(self, "effective_caps", caps)
             object.__setattr__(self, "view", resolved_view)
