@@ -81,7 +81,7 @@ def get_joint_trajectory_from_action(action: np.ndarray, joint_names: List[str],
 
     sec = int(step_time)
     nanosec = int((step_time - sec) * 1e9)
-    point.time_from_start = Duration(sec=sec, nanosec=nanosec)
+    point.time_from_start = Duration(seconds=sec, nanoseconds=nanosec).to_msg()
 
     jointTrajectory.points.append(point)
     return jointTrajectory
