@@ -107,9 +107,9 @@ arena_cfg:
         - variant: ur5e
           mount: arm_mount
       camera:
-        - variant: oakd_rgbd
+        - variant: d435_color
           mount: wrist_cam
-        - variant: oakd_rgbd
+        - variant: d435_color
           mount: arm_base_cam
 
   # general training configuration
