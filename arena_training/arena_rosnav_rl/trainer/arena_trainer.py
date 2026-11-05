@@ -49,12 +49,12 @@ def mobile_action_space(robot: MobileSpec, configured: ActionSpaceSpec | None) -
         raise ValueError(f"agent_config.action_space takes type differential_drive or omnidirectional, got {configured.type!r}; arm spaces come from the robot's caps")
     linear, lateral, angular = action_ranges(robot)
     if robot.is_holonomic:
-        return OmnidirectionalActionSpace(  # pyright: ignore[reportCallIssue]
+        return OmnidirectionalActionSpace(
             linear_range_x=linear,
             linear_range_y=lateral,
             angular_range=angular,
         )
-    return DifferentialDriveActionSpace(  # pyright: ignore[reportCallIssue]
+    return DifferentialDriveActionSpace(
         linear_range=linear,
         angular_range=angular,
     )
@@ -265,7 +265,7 @@ class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
         :class:`~rosnav_rl.cfg.parameters.AgentParameters` is built
         directly from the robot description and arena config.
         """
-        from rosnav_rl.cfg.action_spaces import CompositeActionSpace, ManipulatorActionSpace
+        from rosnav_rl.cfg.action_spaces import CompositeActionSpace, GripperActionSpace, ManipulatorActionSpace
 
         robot_cfg = self.config.arena_cfg.robot
         caps = robot_cfg.effective_caps
@@ -286,6 +286,10 @@ class ArenaTrainer[EnvironmentType: ClosableEnvironment](ABC):
         arm_spaces = [ManipulatorActionSpace.from_config(arm_spec) for arm_spec in (caps.arm or {}).values()]
         if arm_spaces:
             action_space = CompositeActionSpace(action_spaces=[action_space, *arm_spaces])
+
+        gripper_spaces = [GripperActionSpace.from_config(gripper_spec) for gripper_spec in (caps.gripper or {}).values()]
+        if gripper_spaces:
+            action_space = CompositeActionSpace(action_spaces=[action_space, *gripper_spaces])
 
         laser = robot_desc.laser
         if laser is None:

@@ -22,13 +22,14 @@ dependencies = [
     # Scientific Computing
     "scipy>=1.10.0,<2.0.0",
     # Utilities
+    "attrs",
     "pydantic>=2.10.6,<3.0.0",
     "ruamel-yaml>=0.17,<1.0",
     "pygments>=2.18.0,<3.0.0",
     "rosnav-rl", # Include local dependency in dev too
     "pyinstrument>=5.1.2",
 ]
-dynamic = ["license", "scripts"]
+dynamic = ["license", "scripts", "entry-points"]
 
 # Fixed local dependency using [tool.uv.sources]
 [tool.uv.sources]

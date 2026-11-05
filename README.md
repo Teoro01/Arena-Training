@@ -83,7 +83,7 @@ Same arg surface as `arena train` — the CLI verb is just a thin wrapper.
 
 ### Training script (standalone)
 
-For development without a simulator (no env spawning, no service calls), invoke the script directly. This runs the trainer logic against whatever envs already exist; `train_agent.py` will fail at `/arena/spawn_env` if arena_node is not running.
+For development without a simulator (no env spawning, no service calls), invoke the script directly. This runs the trainer logic against whatever envs already exist; `train_agent.py` will fail at `/arena/spawn_env` if arena_runtime_node is not running.
 
 ```bash
 # Default config (sb_training_config.yaml)
@@ -128,6 +128,10 @@ Quick test without a simulator:
 ros2 run arena_training test_agent
 ```
 
+## MCP domain
+
+`arena_training/mcp.py` contributes the `training` domain to the Arena MCP server (`python3 -m arena_mcp ls training` lists its tools). Configs are named as in `arena train` (a file in the share `configs/` dir, or an absolute path) and every config goes through `load_training_config`, so the listing, the parsed `TrainingCfg` JSON with its schema (also the resource `arena://training/schema`) and validation of a file or of YAML text report what training would see. A relative `observations_config` in YAML text resolves against the share configs dir unless `base_dir` is given. Starting training runs `arena train train_config:=<config> [key:=value ...]` as a job and is refused while `/arena/register_env` answers, because training brings up its own runtime. `jobs_cancel` stops it gracefully. Agents are read from `ROSNAV_AGENTS_DIR`, else the arena_training default, with their checkpoints, the latest tensorboard scalars and the log tail of the training job that wrote them.
+
 ## Supported RL Frameworks
 
 | Framework | Algorithms |
@@ -143,6 +147,8 @@ Configs are Pydantic-validated YAML. Top-level keys:
 arena_cfg:       # simulation / task / robot / monitoring settings
 agent_cfg:       # rosnav_rl agent: framework, observation spaces, action space
 ```
+
+`arena_cfg.task.modes` maps a task axis to comma-separated mode names (`robots`, `obstacles`, `modules`). The curriculum queues the listed axes through `QueueEpisode.modes`, an axis left out keeps the env's selection, and the config validates each name against the task runtime's mode vocabulary. Curriculum stage keys named `task.<mode>.<leaf>` go through `QueueEpisode.params` under the param namespace the env's `QueryTaskModes.namespaces` reports for `<mode>`. The legacy keys `tm_robots`, `tm_obstacles` and `tm_modules` are still read and mapped onto `modes`.
 
 ## Troubleshooting
 

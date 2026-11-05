@@ -16,13 +16,17 @@ import rclpy.qos
 import rclpy.time
 import yaml
 from arena_rclpy_mixins.Time import Time
+from arena_runtime_msgs.msg import EpisodeRecord, RobotFleet
 from arena_runtime_msgs.srv import LifecycleHold as LifecycleHoldSrv
 from arena_runtime_msgs.srv import LifecycleStep as LifecycleStepSrv
+from arena_runtime_msgs.srv import ResetEpisode
+from control_msgs.action import GripperCommand
 from geometry_msgs.msg import Twist
+from rclpy.action import ActionClient
 from rclpy.client import Client
 from rclpy.publisher import Publisher
 from rclpy.task import Future
-from rosnav_rl.cfg.action_spaces import BaseActionSpace, CompositeActionSpace, ManipulatorActionSpace
+from rosnav_rl.cfg.action_spaces import CompositeActionSpace, GripperActionSpace, ManipulatorActionSpace
 from rosnav_rl.cfg.parameters import AgentParameters
 from rosnav_rl.observations import DONE_REASONS
 from rosnav_rl.observations.factory.factory import (
@@ -37,13 +41,12 @@ from rosnav_rl.spaces import BaseSpaceManager
 from rosnav_rl.utils.logging import flush_errors_decorator
 from rosnav_rl.utils.rostopic import Namespace
 from rosnav_rl.utils.type_aliases import DecodedAction, EncodedObservationDict, ObservationDict
-from task_generator_msgs.msg import EpisodeRecord, RobotFleet
-from task_generator_msgs.srv import ResetEpisode
 from trajectory_msgs.msg import JointTrajectory
 
 from arena_training.arena_rosnav_rl.node import SupervisorNode
 from arena_training.arena_rosnav_rl.utils.envs import (
     determine_termination,
+    get_gripper_command,
     get_joint_trajectory_from_action,
     get_twist_from_action,
 )
@@ -122,7 +125,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
 
     Attributes:
         node (SupervisorNode): The ROS2 node used for communication.
-        env_ns (Namespace): The env's task_generator_node namespace (lifecycle/state).
+        env_ns (Namespace): The env's arena_env_node namespace (lifecycle/state).
         robot_ns (Namespace): The robot's namespace (cmd_vel, sensor topics). Set by `_resolve_robot`.
         action_space (gymnasium.spaces.Space): The action space, defined by the space manager.
         observation_space (gymnasium.spaces.Space): The observation space, defined by the space manager.
@@ -216,6 +219,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         self._pause_srv = None
         self._cmd_vel_pub = None
         self._joint_trajectory_pubs: dict[str, Publisher] = {}
+        self._gripper_action_clients: dict[str, ActionClient] = {}
         self._episode_state_sub = None
         self._latest_episode: EpisodeRecord | None = None
         self._episode_event = threading.Event()
@@ -354,6 +358,11 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self._joint_trajectory_pubs[arm.controller] = self.node.create_publisher(JointTrajectory, joint_trajectory_topic, 10)
             self.node.get_logger().info(f"Created direct JointTrajectory publisher at: {joint_trajectory_topic}")
 
+        for gripper in self._gripper_specs():
+            gripper_cmd_topic = self.robot_ns(f"{gripper.controller}/gripper_cmd").to_string()
+            self._gripper_action_clients[gripper.controller] = ActionClient(self.node, GripperCommand, gripper_cmd_topic)
+            self.node.get_logger().info(f"Created GripperCommand action client at: {gripper_cmd_topic}")
+
         # Episode-state feed from task_generator (TRANSIENT_LOCAL).
         episode_topic = (self.env_ns / "state" / "episode").to_string()
         self._episode_state_sub = self.node.create_subscription(
@@ -462,6 +471,12 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         specs = spec.action_spaces if isinstance(spec, CompositeActionSpace) else [spec]
         return [s for s in specs if isinstance(s, ManipulatorActionSpace)]
 
+    def _gripper_specs(self) -> list[GripperActionSpace]:
+        """The gripper sub-spaces of the action space."""
+        spec = self._model_space_manager.action_space_manager.spec
+        specs = spec.action_spaces if isinstance(spec, CompositeActionSpace) else [spec]
+        return [s for s in specs if isinstance(s, GripperActionSpace)]
+
     def _encode_observation(self, observation: ObservationDict) -> EncodedObservationDict:
         """Encodes the given observation using the model space encoder."""
         return cast(EncodedObservationDict, self._model_space_manager.encode_observation(observation))
@@ -517,6 +532,12 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         for spec, decoded in decoded_action:
             if isinstance(spec, ManipulatorActionSpace):
                 self._joint_trajectory_pubs[spec.controller].publish(get_joint_trajectory_from_action(decoded, spec.joint_names, dt))
+            elif isinstance(spec, GripperActionSpace):
+                client = self._gripper_action_clients[spec.controller]
+                if client.server_is_ready():
+                    client.send_goal_async(get_gripper_command(float(decoded[0]), spec.max_effort))
+                else:
+                    self.node.get_logger().warning(f"[{self.env_ns.to_string()}] {spec.controller}/gripper_cmd is not ready, gripper command dropped", throttle_duration_sec=5.0)
             elif spec.type in ("differential_drive", "omnidirectional"):
                 # Publish velocity command directly, no nav2 controller dependency.
                 assert self._cmd_vel_pub is not None
@@ -658,6 +679,7 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
                 self._after_task_reset()
                 self._episode = self._latest_episode.episode_id if self._latest_episode is not None else prev_id + 1
 
+            self._open_grippers()
             self._reward_function.reset()
             self._model_space_manager.reset_spaces()
 
@@ -674,6 +696,14 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
         info = {}
         return self._encode_observation(obs_dict), info
 
+    def _open_grippers(self) -> None:
+        """Waits for every gripper action server and sends it the open position."""
+        for gripper in self._gripper_specs():
+            client = self._gripper_action_clients[gripper.controller]
+            if not client.wait_for_server(timeout_sec=10.0):
+                raise RuntimeError(f"Gripper action server '{gripper.controller}/gripper_cmd' not available after 10s")
+            client.send_goal_async(get_gripper_command(gripper.positions["open"], gripper.max_effort))
+
     def close(self):
         """Cleans up ROS2 resources."""
         self.node.get_logger().info("Closing environment and shutting down ROS components.")
@@ -683,6 +713,8 @@ class ArenaBaseEnv(ABC, gymnasium.Env):
             self._release_lockstep_hold()
         if self._cmd_vel_pub is not None:
             self.node.destroy_publisher(self._cmd_vel_pub)
+        for client in self._gripper_action_clients.values():
+            client.destroy()
         if self._reset_task_srv is not None:
             self._reset_task_srv.destroy()
         if self._pause_srv is not None:
