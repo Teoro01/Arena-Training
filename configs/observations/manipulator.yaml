@@ -60,26 +60,12 @@ datasources:
     type: RobotPoseTFGenerator         # Generator (no ROS topic) → Pose2D
     params: {}                         # Uses simulation_state_container for frame config
 
-  end_effector_pose_from_tf:
-    type: EndEffectorPoseTFGenerator
-    params: {}
-
   # Sensor data collectors
   front_laser:
     type: sensor_msgs/LaserScan        # → LidarRanges
     params:
       topic: "lidar"                    # Primary lidar topic
       up_to_date_required: true        # Critical for obstacle avoidance
-
-  wrist_color:
-    type: ImageColorCollector
-    params:
-      topic: "wrist_camera/image"
-
-  arm_base_color:
-    type: ImageColorCollector
-    params:
-      topic: "arm_base_camera/image"
 
   # Navigation target collectors  
   goal_pose:
@@ -97,11 +83,6 @@ datasources:
     params:
       topic: "cmd_vel"                 # Robot velocity commands
       # up_to_date_required: true
-
-  last_arm_action:
-    type: trajectory_msgs/JointTrajectory
-    params:
-      topic: "joint_trajectory"
 
   robot_twist:
     type: OdometryTwistCollector       # measured robot velocity in the base frame
@@ -148,11 +129,39 @@ datasources:
   #     topic: "collision_monitor_state"
   #     state_key: "collision"            # Specific collision state to monitor
 
+  # === MANIPULATION === #
+
+  end_effector_pose_from_tf:
+    type: EndEffectorPoseTFGenerator
+    params: {}
+
   joint_states:
-    type: control_msgs/JointTrajectoryControllerState
+    type: JointStateCollector
     params:
       topic: "arm_controller/controller_state"
       up_to_date_required: true
+
+  gripper_state:
+    type:
+    params:
+      topic:
+      up_to_date_required: true
+  
+  last_arm_action:
+    type: JointTrajectoryCollector
+    params:
+      topic: "joint_trajectory"
+
+  wrist_color:
+    type: ImageColorCollector
+    params:
+      topic: "wrist_camera/image"
+
+  arm_base_color:
+    type: ImageColorCollector
+    params:
+      topic: "arm_base_camera/image"  
+  
 
   # ---------------------------------------------------------------------------
   # OPTIONAL COLLECTORS: Additional sensors for advanced configurations
